@@ -1,0 +1,502 @@
+package hello;
+
+/*GraphConstructs constructs the graphs using given information.
+ * It also handles the route generation
+ */
+
+import java.util.ArrayList;
+import java.util.List;
+
+import org.jgrapht.*;
+import org.jgrapht.alg.interfaces.ShortestPathAlgorithm;
+import org.jgrapht.alg.scoring.Coreness;
+import org.jgrapht.alg.shortestpath.DijkstraShortestPath;
+import org.jgrapht.graph.*;
+import org.jgrapht.traverse.DepthFirstIterator;
+import org.jgrapht.traverse.GraphIterator;
+import org.jgrapht.traverse.RandomWalkIterator;
+
+public class GraphConstructor {
+	
+	private double distance;
+	private double targetDistance;
+	
+	public GraphConstructor() {
+		System.out.println("New GraphConstructor");
+		this.distance = 0.0;
+		this.targetDistance = 5.0;
+	}//End constructor
+	
+	public GraphConstructor(double dist) {
+		System.out.println("New GraphConstructor");
+		this.distance = 0.0;
+		this.targetDistance = dist;
+	}//End constructor
+  
+	//Creates a Graph with OSMNode vertices and OSMEdge edges.
+	public Graph<OSMNode, OSMEdge> createEdgeGraph(ArrayList<OSMEdge> edges) {
+		
+		System.out.println("Creating Graph with " + edges.size() + " edges");
+		Graph<OSMNode, OSMEdge> g = new SimpleWeightedGraph<OSMNode, OSMEdge>(OSMEdge.class);
+		
+		for (int i = 0; i < edges.size(); i++) {
+			OSMEdge edge = edges.get(i);
+			g.addVertex(edge.getSourceNode());
+			g.addVertex(edge.getTargetNode());
+			g.addEdge(edge.getSourceNode(), edge.getTargetNode(), edge);
+			
+			OSMEdge edgeToWeight = g.getEdge(edge.getSourceNode(), edge.getTargetNode());
+			Double weight = edge.getDistance();
+			g.setEdgeWeight(edgeToWeight, weight);
+		}//End for
+		
+		System.out.println("Graph Created");
+		return g;
+	}//End createEdgeGraph
+	
+	//Creates a cyclical Graph with OSMNode nodes and DefaultEdge edges *TESTING*
+	public Graph<OSMNode, DefaultEdge> createNodeGraph(ArrayList<OSMNode> vertices) {
+		
+		Graph<OSMNode, DefaultEdge> g = new SimpleGraph<OSMNode, DefaultEdge>(DefaultEdge.class);
+
+		for (int i = 0; i < vertices.size(); i++) {
+			g.addVertex(vertices.get(i));
+			if (i >= 1) {
+				g.addEdge(vertices.get(i - 1), vertices.get(i));
+			}//End if
+			if (i == vertices.size() - 1) {
+				g.addEdge(vertices.get(i), vertices.get(0));
+			}//End if
+		}//End for
+		return g;
+	}//End createNodeGraph
+	
+	//Creates a cyclical String graph *TESTING*
+	public DefaultDirectedGraph<String, DefaultEdge> createStringGraph(String[] vertices)
+	{
+		DefaultDirectedGraph<String, DefaultEdge> g = new DefaultDirectedGraph<String, DefaultEdge>(DefaultEdge.class);
+
+		for (int i = 0; i < vertices.length; i++) {
+			g.addVertex(vertices[i]);
+			if (i >= 1) {
+				g.addEdge(vertices[i - 1], vertices[i]);
+			}//End if
+			if (i == vertices.length - 1) {
+				g.addEdge(vertices[i], vertices[0]);
+			}//End if
+		}//End for
+		return g;
+	}//End createStringGraph
+	
+	/*
+* Depth First Iteration with Dijkstras Shortest Path
+* Input: An undirected weighted graph G = (V, E), A vertex from which to start the search and the desired output length.
+Output: A route satisfying the solution requirements.
+
+generateRoute (graph, source, length)
+1	//route = generated route
+2	//currentDistance = distance traversed along route
+3	// dfDistance = distance for DepthFirstIterator(DFI) to travel, set to 	length/2 initially
+4	while (currentDistance <= length) do
+5		//Perform Depth First Iteration
+6		while (currentDistance <= dfDistance) do
+7			route += DFI(source -> dfDistance)
+8			currentDistance += route.distance
+9		end while
+10		//Produce DijkstraShortestPath(DSP) back to source
+11		returnRoute = DSP(route.lastNode -> source)
+12		route += returnRoute
+13		currentDistance += returnRoute.distance
+14		Resetting if less than desired length
+15		if (currentDistance <= length) then	
+16			currentDistance = 0
+17			dfDistance += 0.1
+18			route.clear()
+19		end if
+20	end while
+21	return route 
+end generateRoute()
+	 */
+	public ArrayList<OSMEdge> constructDFSandDJKRoute(int size, OSMNode source, Graph<OSMNode, OSMEdge> graph) {
+		ArrayList<OSMEdge> edges = new ArrayList<>();
+		ArrayList<OSMNode> constructedGraph = new ArrayList<>();
+		
+		GraphIterator<OSMNode, OSMEdge> iterator = new DepthFirstIterator<OSMNode, OSMEdge>(graph, source);
+		constructedGraph.add(source);
+		int i = 0;
+		
+		Coreness<OSMNode, OSMEdge> core = new Coreness<OSMNode, OSMEdge>(graph);
+		
+		while (iterator.hasNext()) {
+			if (i >= size) {
+				break;
+			} else {
+				OSMNode node = iterator.next();
+				if (node.getVisited() == true) {
+					//System.out.println("Node already visited");
+				} else {
+					if (core.getVertexScore(node) == 1) {
+						//System.out.println("Dead End");
+					} else {
+						constructedGraph.add(node);
+						node.setVisited();
+						i++;
+					}//end if else
+				}//End inner if else
+			}//End outer if else
+			
+		}//End while
+		
+		double currentDist = this.targetDistance / 2;
+		while (this.distance < this.targetDistance) {
+			if (currentDist == this.targetDistance) {
+				break;
+			}//end if
+			currentDist = currentDist + 0.1;
+			
+			edges = constructWalk(i, currentDist, constructedGraph);
+			
+			Graph<OSMNode, OSMEdge> tempGraph = new AsSubgraph(graph);
+			if (isPath(graph, edges, source) ==  true) {
+				tempGraph.removeAllEdges(edges);
+			}//end if
+			
+	    	DijkstraShortestPath dj = new DijkstraShortestPath(tempGraph);
+	    	GraphPath<OSMNode, OSMEdge> gp = dj.getPath(edges.get(edges.size() - 1).getTargetNode(), source);
+	    	if (gp != null) {
+		    	List<OSMEdge> sp = gp.getEdgeList();
+		    	ArrayList<OSMEdge> spEdges =  new ArrayList<>();
+		    	spEdges.addAll(sp);
+		    	
+		    	for (int j = 0; j < spEdges.size(); j++) {
+					OSMEdge tempEdge = spEdges.get(j);
+					edges.add(tempEdge);
+					distance = distance + tempEdge.getDistance();
+		    	}//end for
+	    	} else {
+	    		System.out.println("Dead End");
+	    	}//end if else
+	    	
+	    	//System.out.println("Full Distance: " + this.distance);
+		}//end while
+    	
+		System.out.println("Full Distance: " + this.distance);
+		return edges;
+	}//End constructDFSandDJKroute()
+	
+	//Checks to see if there is a valid path back to the source
+	public boolean isPath(Graph<OSMNode, OSMEdge> graph, ArrayList<OSMEdge> edges, OSMNode source) {
+		Graph<OSMNode, OSMEdge> tempGraph = new AsSubgraph(graph);
+		tempGraph.removeAllEdges(edges);
+		
+    	DijkstraShortestPath dj = new DijkstraShortestPath(tempGraph);
+    	if (dj.getPath(edges.get(edges.size() - 1).getTargetNode(), source) != null) {
+    		return true;
+    	} else {
+    		return false;
+    	}//end if else
+	}//end isPath()
+	
+	//Constructs the DFS aspect of approach 2
+	public ArrayList<OSMEdge> constructWalk(int i, double targetDistance, ArrayList<OSMNode> constructedGraph) {
+		ArrayList<OSMEdge> edges = new ArrayList<>();
+		
+		this.distance = 0.0;
+		for (int j = 0; j < i - 1; j++) {
+			if (distance <= targetDistance) {
+				OSMNode tempNode = constructedGraph.get(j);
+				ArrayList<OSMEdge> tempEdges =  tempNode.getEdges();
+				if (tempEdges.size() == 1) {
+					//System.out.println("Dead End");
+					//test.reset();
+				} else {
+					for (int k = 0; k < tempEdges.size(); k++) {
+						OSMEdge tempEdge = tempEdges.get(k);
+						OSMNode neighbour = tempEdge.getNeighbour(tempNode);
+						if (constructedGraph.get(j + 1) == neighbour) {
+							edges.add(tempEdge);
+							distance = distance + tempEdge.getDistance();
+						}//End if 
+					}//End inner for
+				}//end if else
+			} else {
+				break;
+			}//End if else
+		}//End outer for
+		System.out.println("Depth-First Distance : " + distance);
+		//System.out.println(edges.size() + " : " + constructedGraph.size());
+		
+		return edges;
+	}//End constructWalk
+	
+	/*
+Approach 3 Optimal Dijkstras Routing
+Input: An undirected weighted graph G = (V, E), A vertex from which to start the search and the desired output length.
+Output: A route satisfying the solution requirements.
+
+generateRoute (graph, source, length)
+1	// Produce DijkstraShortestPath(DSP) from source to all nodes in graph
+2	pathsOut = DSP(source -> graph.nodeSet)
+3	for (pathOut: pathsOut) do
+4		//check only potentially viable paths
+5		if (pathOut.distance > (length / 3) && pathOut.distance < length) then
+6			//ensure path out is not traversable for path home 
+7			graph.remove(pathOut)
+8			k = pathOut.size() - 1
+9			//Loop until valid path back to source is found
+10			while (!pathHomeFound) do
+11				pathHome = DSP(pathOut.lastNode -> source)
+12				if (pathHome != null) then
+13					validRoutes.add(pathOut + pathHome) 
+14					pathHomeFound = true
+15				else
+16					//Re-add edges until a valid path back is possible
+17					graph.add(pathOuth[k])
+18					k--
+19				end if else
+20			end while
+21		end if
+22	end for
+23	//compare all the possible routes to find the route that is closest to the desired length 
+24	route = mostOptimalRoute(validRoutes, length)
+25	return route
+end generateRoute()
+
+	 */
+	public Route constructDJKRoute(Graph<OSMNode, OSMEdge> wayGraph, OSMEdge[] wayEdges, OSMNode closestNode, double distance) {
+		//Producing paths out
+		DijkstraShortestPath<OSMNode, OSMEdge> dj = new DijkstraShortestPath<OSMNode, OSMEdge>(wayGraph);
+		ShortestPathAlgorithm.SingleSourcePaths<OSMNode, OSMEdge> paths = dj.getPaths(closestNode);
+		
+		ArrayList<Route> routes = new ArrayList<Route>();
+		ArrayList<ArrayList<OSMEdge>> deadEnd = new ArrayList<ArrayList<OSMEdge>>();
+		
+		//Checking source coreness
+		boolean coreness;
+		OSMNode homeNode = new OSMNode();
+		Coreness<OSMNode, OSMEdge> core = new Coreness<OSMNode, OSMEdge>(wayGraph);
+		if (core.getVertexScore(closestNode) >= 2) {
+			coreness = true;
+			homeNode = closestNode;
+		} else {
+			coreness = false;
+		}//end if else
+		
+		System.out.println("Finding applicable routes");
+		for (int i = 0; i < wayEdges.length; i++) {
+			//Checking only potentially viable paths
+			double weight = paths.getWeight(wayEdges[i].getTargetNode());
+			if (weight > (distance / 3) && weight !=  Double.POSITIVE_INFINITY && weight < distance - (distance / 4)) {
+				GraphPath<OSMNode, OSMEdge> path = paths.getPath(wayEdges[i].getTargetNode());
+				
+				//ensure path out is not traversable for path home 
+				Graph<OSMNode, OSMEdge> tempGraph = new AsSubgraph<OSMNode, OSMEdge>(wayGraph);
+				List<OSMEdge> list = path.getEdgeList();
+				tempGraph.removeAllEdges(list);
+				boolean pathFound = false;
+				
+				if (coreness == false) {
+					int c = 0;
+					OSMEdge edge = list.get(c);
+					boolean coreFound  = false;
+					while (coreFound == false) {
+						if (core.getVertexScore(edge.getTargetNode()) >= 2) {
+							tempGraph.addEdge(edge.getSourceNode(), edge.getTargetNode(), edge);
+							homeNode = edge.getTargetNode();
+							coreFound = true;
+						} else {
+							c++;
+							tempGraph.addEdge(edge.getSourceNode(), edge.getTargetNode(), edge);
+							edge = list.get(c);
+						}//end if else
+					}//end while
+				}//end if
+				
+				//Loop until valid path back to source is found
+				ArrayList<OSMEdge> tempDeadEnd = new ArrayList<OSMEdge>();
+				int k = list.size() - 1;
+				while (pathFound == false) {
+					DijkstraShortestPath<OSMNode, OSMEdge> dj2 = new DijkstraShortestPath<OSMNode, OSMEdge>(tempGraph);
+					GraphPath<OSMNode, OSMEdge> pathHome = dj2.getPath(path.getEndVertex(), homeNode);
+					if (pathHome != null) {
+						List<OSMEdge> listHome = pathHome.getEdgeList();
+						
+						Route tempRoute = new Route();
+						tempRoute.addToRoute(list);
+						tempRoute.addToRoute(listHome);
+						
+						routes.add(tempRoute);
+						deadEnd.add(tempDeadEnd);
+						
+						pathFound = true;
+					} else {
+						//Re-add edges until a valid path back is possible
+						OSMEdge tempEdge = list.get(k);
+						tempGraph.addEdge(tempEdge.getSourceNode(), tempEdge.getTargetNode());
+						tempDeadEnd.add(tempEdge);
+						k--;
+					}//end if else
+				}//end while
+				//break;
+			}//end if
+		}//end for
+		
+		//Compare all the possible routes to find the route that is closest to the desired length
+		routes.get(0).removeFromRoute(deadEnd.get(0));
+		
+		double closestRoute = routes.get(0).getWeight();
+		double routeOffset = 0.0;
+		
+		if (closestRoute < distance) {
+			routeOffset = distance - closestRoute;
+		} else {
+			routeOffset = closestRoute - distance;
+		}//end if else
+		
+		int crIndex = 0;
+		
+		System.out.println("Comparing " + routes.size() + " routes to find best one");
+		for (int i = 0; i < routes.size(); i++) {
+			routes.get(i).removeFromRoute(deadEnd.get(i));
+			closestRoute = routes.get(i).getWeight();
+			
+			if (closestRoute <= distance -1 || closestRoute >= distance + 1) {
+				//System.out.println("Routes are not considered");
+			} else {
+				if (closestRoute < distance) {
+					if ((distance - closestRoute) < routeOffset) {
+						routeOffset = distance - closestRoute;
+						System.out.println("Route Offset: " + routeOffset);
+						crIndex = i;
+					}//end if
+				} else {
+					if ((closestRoute - distance) < routeOffset) {
+						routeOffset = closestRoute - distance;
+						System.out.println("Route Offset: " + routeOffset);
+						crIndex = i;
+					}//end if
+				}//end if else
+			}//end if else
+		}//end for
+    	
+    	System.out.println("Returning route of size: " + routes.get(crIndex).getWeight() + " : " + routes.get(crIndex).getRoute().size());
+    	closeLoop(routes.get(crIndex), wayGraph);
+		return routes.get(crIndex);
+	}//end constructDJKROute()
+	
+	public Route constructQuickDJKRoute(Graph<OSMNode, OSMEdge> wayGraph, OSMEdge[] wayEdges, OSMNode closestNode, double distance) {
+		DijkstraShortestPath<OSMNode, OSMEdge> dj = new DijkstraShortestPath<OSMNode, OSMEdge>(wayGraph);
+		ShortestPathAlgorithm.SingleSourcePaths<OSMNode, OSMEdge> paths = dj.getPaths(closestNode);
+		
+		ArrayList<ArrayList<OSMEdge>> deadEnd = new ArrayList<ArrayList<OSMEdge>>();
+		
+		boolean coreness;
+		OSMNode homeNode = new OSMNode();
+		Coreness<OSMNode, OSMEdge> core = new Coreness<OSMNode, OSMEdge>(wayGraph);
+		if (core.getVertexScore(closestNode) == 2) {
+			coreness = true;
+			homeNode = closestNode;
+		} else {
+			coreness = false;
+		}//end if else
+		
+		for (int i = 0; i < wayEdges.length; i++) {
+			double weight = paths.getWeight(wayEdges[i].getTargetNode());
+			if (weight > (distance / 4) && weight !=  Double.POSITIVE_INFINITY && weight < distance) {
+				Route route = new Route();
+				GraphPath<OSMNode, OSMEdge> path = paths.getPath(wayEdges[i].getSourceNode());
+				
+				Graph<OSMNode, OSMEdge> tempGraph = new AsSubgraph<OSMNode, OSMEdge>(wayGraph);
+				List<OSMEdge> list = path.getEdgeList();
+				tempGraph.removeAllEdges(list);
+				boolean pathFound = false;
+				
+				if (coreness == false) {
+					int c = 0;
+					OSMEdge edge = list.get(c);
+					boolean coreFound  = false;
+					while (coreFound == false) {
+						if (core.getVertexScore(edge.getTargetNode()) == 2) {
+							tempGraph.addEdge(edge.getSourceNode(), edge.getTargetNode(), edge);
+							homeNode = edge.getTargetNode();
+							coreFound = true;
+						} else {
+							c++;
+							tempGraph.addEdge(edge.getSourceNode(), edge.getTargetNode(), edge);
+							edge = list.get(c);
+						}//end if else
+					}//end while
+				}//end if
+				
+				ArrayList<OSMEdge> tempDeadEnd = new ArrayList<OSMEdge>();
+				int k = list.size() - 1;
+				while (pathFound == false) {
+					DijkstraShortestPath<OSMNode, OSMEdge> dj2 = new DijkstraShortestPath<OSMNode, OSMEdge>(tempGraph);
+					GraphPath<OSMNode, OSMEdge> pathHome = dj2.getPath(path.getEndVertex(), homeNode);
+					if (pathHome != null) {
+						List<OSMEdge> listHome = pathHome.getEdgeList();
+						
+						route.addToRoute(list);
+						route.addToRoute(listHome);
+						route.removeFromRoute(tempDeadEnd);
+						
+						double currentRouteWeight = route.getWeight();
+						
+						if (currentRouteWeight <= (distance + 0.5) && currentRouteWeight >= (distance - 0.5)) {
+							System.out.println(currentRouteWeight);
+							closeLoop(route, wayGraph);
+							return route;
+						} else {
+							route.getRoute().clear();
+							pathFound = true;
+						}//end if else
+						
+					} else {
+						OSMEdge tempEdge = list.get(k);
+						tempGraph.addEdge(tempEdge.getSourceNode(), tempEdge.getTargetNode());
+						tempDeadEnd.add(tempEdge);
+						k--;
+					}//end if else
+				}//end while
+				//break;
+			}//end if
+		}//end for
+		
+		System.out.println("No Route Found");
+    	
+		return null;
+	}//End construtDJKRoute()
+	
+	//Sometimes, even if it is included in the route, the graph wont be closed when it is drawn
+	public void closeLoop(Route route, Graph<OSMNode, OSMEdge> wayGraph) {
+    	int size = route.getRoute().size() - 1;
+    
+    	OSMNode endTargetNode = route.getRoute().get(size).getTargetNode();
+    	OSMNode endSourceNode = route.getRoute().get(size).getSourceNode();
+    	
+    	OSMNode startTargetNode = route.getRoute().get(0).getTargetNode();
+    	OSMNode startSourceNode = route.getRoute().get(0).getSourceNode();
+    	if (wayGraph.containsEdge(endSourceNode, startSourceNode)) {
+    		if (route.getRoute().contains(wayGraph.getEdge(endSourceNode, startSourceNode))) {
+    			//System.out.println("source to source");
+    			route.addWeightlessToRoute(wayGraph.getEdge(endSourceNode, startSourceNode));
+    		}//end if
+    	}else if (wayGraph.containsEdge(endSourceNode, startTargetNode)) {
+    		if (route.getRoute().contains(wayGraph.getEdge(endSourceNode, startTargetNode))) {
+    			//System.out.println("source to target");
+    			route.addWeightlessToRoute(wayGraph.getEdge(endSourceNode, startTargetNode));
+    		}//end if
+    	} else if (wayGraph.containsEdge(endTargetNode, startSourceNode)) {
+    		if (route.getRoute().contains(wayGraph.getEdge(endTargetNode, startSourceNode))) {
+    			//System.out.println("target to source")
+    			route.addWeightlessToRoute(wayGraph.getEdge(endTargetNode, startSourceNode));
+    		}//end if
+    	} else if (wayGraph.containsEdge(endTargetNode, startTargetNode)) {
+    		if (route.getRoute().contains(wayGraph.getEdge(endTargetNode, startTargetNode))) {
+    			//System.out.println("target to target");
+    			route.addWeightlessToRoute(wayGraph.getEdge(endTargetNode, startTargetNode));
+    		}//end if
+    	}//end if else
+	}//end closeLoop()
+	
+}//End GraphTesting
